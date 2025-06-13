@@ -1,0 +1,123 @@
+
+logging:
+  log_level_cli: "DEBUG"  # Options: DEBUG, INFO, WARNING, ERROR, etc.
+  log_file: "netsim_{timestamp}.log"
+  max_bytes: 10000000  # 10MB
+  backup_count: 3
+
+# Patterns to play through in YAML mode.
+timeline:
+  - pattern: "tcp_handshake"
+    start: 0
+    duration: 60
+
+  - pattern: "udp_dns_frag"
+    start: 0
+    duration: 20
+
+  - pattern: "icmp_unreachable"
+    start: 0
+    duration: 10
+
+  - pattern: "fsm_quic_stream"
+    start: 0
+    duration: 30
+    kwargs:
+      asn: 15169
+      asn_ip_map:
+        15169: ["8.8.8.0/24", "8.34.208.0/20"]
+      burst_count: 12
+
+  - pattern: "fsm_gre_tunnel"
+    start: 0
+    duration: 10
+    kwargs:
+      asn: 3356
+      asn_ip_map:
+        3356: ["4.0.0.0/9", "4.32.0.0/11"]
+      burst_count: 6
+
+  # FSM IPsec
+  - pattern: "fsm_ipsec_tunnel"
+    start: 0
+    duration: 20
+    kwargs:
+      asn: 64500
+      asn_ip_map:
+        64500: ["198.51.100.0/24"]
+      esp_count: 4
+      mode: "esp_only"
+
+  - pattern: "fsm_ipsec_tunnel"
+    start: 0
+    duration: 20
+    kwargs:
+      asn: 64500
+      asn_ip_map:
+        64500: ["198.51.100.0/24"]
+      mode: "ah_only"
+
+  - pattern: "fsm_ipsec_tunnel"
+    start: 0
+    duration: 20
+    kwargs:
+      asn: 64500
+      asn_ip_map:
+        64500: ["198.51.100.0/24"]
+      mode: "ah_then_esp"
+
+  - pattern: "fsm_ipsec_tunnel"
+    start: 0
+    duration: 20
+    kwargs:
+      asn: 64500
+      asn_ip_map:
+        64500: ["198.51.100.0/24"]
+      mode: "esp_ah_interleaved"
+
+  # FSM BGP
+  - pattern: "fsm_bgp_session"
+    start: 0
+    duration: 60
+    kwargs:
+      mode: "normal"
+      include_updates: true
+      established_duration: 60
+      keepalive_interval: 20
+
+  # FSM HTTP
+  - pattern: "fsm_http"
+    start: 0
+    duration: 20
+    kwargs:
+      request_count: 2
+      keepalive: false
+      payload_size_range: [300, 1200]
+
+  # FSM HTTPS
+  - pattern: "fsm_https"
+    start: 0
+    duration: 20
+    kwargs:
+      request_count: 3
+      keepalive: true
+      payload_size_range: [400, 1400]
+
+  # FSM SSH
+  - pattern: "fsm_ssh"
+    start: 0
+    duration: 45
+    kwargs:
+      session_duration: 30
+      interactive: true
+
+  # Configurable TCP Exchange
+  # exchange_count > 100 will cause every 3rd exchange (6 packets) to receive 1.5x the jitter value in delay
+  # simply call this multiple times with less exchange from the pattern to resolve this
+  - pattern: "fsm_tcp_session"
+    start: 0
+    duration: 15
+    kwargs:
+      exchange_count: 20          # After handshake, how many A/PA exchanges with incrementing seq/ack
+      payload_range: [300, 1200]  # Select random payload sizes for PA packets
+      jitter: 0.2                 # packet delay value, randomly chosen from 0.001-{jitter}
