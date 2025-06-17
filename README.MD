@@ -24,11 +24,6 @@ pip install -e .
 
 This will make the `netsim` package available in your environment for development and testing.
 
-
-```bash
-pip install -e .
-```
-
 ### 4. Run the Application
 
 Run directly using your raw-socket-capable virtualenv Python:
