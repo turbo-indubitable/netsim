@@ -54,7 +54,10 @@ def runner_entrypoint(
             stats_dict[pattern_id]["status"] = "ready"
 
         # Packet generation and queueing
+        print(f"[runner:{pattern_id}] Entering generate()...")
         for pkt in pattern.generate():
+            print(f"[runner:{pattern_id}] Yielded: {pkt.summary()}")
+
             if shared_queue is not None:
                 try:
                     shared_queue.put(pkt, timeout=2)

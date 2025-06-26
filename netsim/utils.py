@@ -4,6 +4,7 @@ import random
 import time
 import types
 import psutil
+from pathlib import Path
 from typing import Tuple, List, Union
 from scapy.all import fuzz, Packet, IP, TCP, UDP, Raw
 
@@ -190,3 +191,7 @@ def send_tcp_exchange(packets: List, src_ip: str, dst_ip: str, sport: int, dport
             time.sleep(delay)
 
     return seq
+
+def get_config_path(filename="simulation_config.yaml") -> Path:
+    root = Path(__file__).resolve().parents[1]  # goes up to project root
+    return root / "config" / filename

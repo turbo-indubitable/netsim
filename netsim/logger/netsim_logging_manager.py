@@ -5,6 +5,7 @@ from datetime import datetime
 import yaml
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
+from netsim.utils import get_config_path
 
 # === ANSI Color Codes ===
 LOG_COLORS = {
@@ -80,7 +81,7 @@ class LoggingManager:
         default_backup_count = 3
 
         # Load from YAML
-        self.config = self._load_config(config_path or "../config/simulation_config.yaml")
+        self.config = self._load_config(config_path or get_config_path())
 
         log_file = self.config.get("log_file", default_log_file)
         console_level = self.config.get("log_level_cli", default_console_level)
@@ -93,11 +94,10 @@ class LoggingManager:
         self._setup_handlers(log_file, console_level, max_bytes, backup_count)
 
     def _load_config(self, path):
-        config_path = Path(__file__).resolve().parents[1] / "config" / "simulation_config.yaml"
+        config_path = Path(path).resolve()
         try:
-            with config_path.open() as f:
-                yaml_data = yaml.safe_load(f)
-                return yaml_data.get("logging", {})
+            with open(config_path, "r") as f:
+                return yaml.safe_load(f)
         except Exception as e:
             print(f"[LoggingManager] Warning: Failed to read logging config from {config_path}: {e}")
             return {}

@@ -20,6 +20,8 @@ class TCPHandshakePattern(BasePattern):
     name = "tcp_handshake"
 
     def generate(self, **kwargs):
+        assert self.src_ip is not None, "src_ip missing"
+        assert self.dst_ip is not None, "dst_ip missing"
         sport = RandShort()
         base = IP(src=self.src_ip, dst=self.dst_ip)
         yield base / TCP(sport=sport, dport=80, flags="S", seq=1000)

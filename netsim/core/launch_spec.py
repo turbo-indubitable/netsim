@@ -5,6 +5,7 @@ import psutil
 import logging
 import traceback
 from typing import Callable, Dict, Optional
+from netsim.launch.runner import runner_entrypoint
 
 class PatternWatchdog(threading.Thread):
     def __init__(self, name: str, pid: int, queue=None, stats_dict=None, pid_map=None, duration=10, interval=1.0):
@@ -79,8 +80,10 @@ class PatternLaunchSpec:
 
     def start(self):
         self.process = multiprocessing.Process(
-            target=self._launch_pattern,
-            name=f"sender-{self.pattern_id}"
+            target=runner_entrypoint,
+            args=(self.pattern_id, self.pattern_class, self.kwargs, self.shared_queue, self.stats_dict, self.pid_map),
+            name=f"sender-{self.pattern_id}",
+            daemon=True
         )
         self.process.start()
 
@@ -112,6 +115,7 @@ class PatternLaunchSpec:
             return f"error:{e}"
 
     def _launch_pattern(self):
+        print(f"[DEBUG] ENTERED _launch_pattern for {self.pattern_id}")
         self.start_time = time.time()
         logging.info(f"[PatternLaunchSpec:{self.pattern_id}] Starting launch.")
         try:

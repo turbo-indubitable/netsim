@@ -30,6 +30,7 @@ An intuitive, language like command structure `start pattern_y in 30 loop 10` al
 ### Current
 Netsim currently supports basic interactive pattern launching, and scheduling.  
 There is a limited set of partially developed patterns, but the logic exists to build this out further.
+Netsim can pick IP's from consumer, service, and cdn blocks to use when specifying flow types.
 ### Future Plans
 - Complete a substantial library of patterns using as many generic function steps as possible for re-use by others with new patterns in the future.
 - Enhanced scheduling options, ability to control concurrency in case of misconfiguration
@@ -40,6 +41,8 @@ There is a limited set of partially developed patterns, but the logic exists to 
    - PCAP packet value "Fuzzing"
 - On-the-fly patterning (a pcap like terminology used to generate ad-hoc without yaml)
    - Programatic entrypoint for the same, for use by other models or code
+- Output mode of direct-PCAP
+- Interface interactive selection and interface selection inclusion in patterns
 
 ----------------
 
@@ -87,6 +90,15 @@ sudo setcap cap_net_raw,cap_net_admin=eip .venv/bin/python-rawsocket
 ```
 
 This avoids needing to run as `sudo` while still allowing raw network operations.
+---
+## Settings found in \_\_main\_\_.py
+``` run_mode_ = "yaml+interactive"
+    speed_mode_ = True
+    output_mode_ = "send"
+    iface_ = "lo"
+```
+Your interface name must match the system name.  lo by default, but that could present issues.
+Not all loopbacks can handle layer 3 packet writing in the method we utilize here, currently.
 
 ---
 
@@ -139,10 +151,16 @@ This avoids needing to run as `sudo` while still allowing raw network operations
 └── test_import.py
 
 ```
+---
+## Patterns
 
 Patterns can reference and use one or more state machines, as needed, but it is not required.  
-These can be as simple as several hard-coded packet values in order. The state machine classes exist to provide a method of enforcing conversational behavior.
-When creating new patterns keep with the existing function format and there should be no issues.
+These can be as simple as several hard-coded packet values in order - if that's what you want. 
+The state machine classes exist to provide a method of enforcing normal conversational behavior, but can be tweaked to enforce abnormal behavior as well.
+
+- When creating new patterns keep with the existing function format and there should be no issues. 
+- Remember to add new patterns to the pattern registry as well after creation, or you won't be able to call them by name or in the timeline. 
+- Remember to update your help files with the new pattern names as they are created.
 
 ---
 
@@ -168,29 +186,69 @@ setup(
     description="Synthetic network traffic simulation framework",
     python_requires='>=3.8',
 )
+
 ```
-
-**Note:** Ensure that your `__main__.py` file contains a `main()` function to serve as the entry point.
-
 ---
 
-## 📄 requirements.txt
+## CLI Environment
+Netsim runs an interactive shell (provided this is not disabled) which will appear as soon as you run the tool.
+Sample output and commands:
 
-To update your dependencies list from the current environment:
-
-```bash
-pip freeze > requirements.txt
-```
-
----
-
-## 🧼 Cleanup
-
-To remove the virtual environment:
-
-```bash
-deactivate
-rm -rf venv
+```netsim> Type 'help' for commands.
+  netsim> help
+  Available commands:
+    start <pattern_id> [in <s>] [for <s> | loop <n>] [flow <type>] - Launch pattern (use either 'for' or 'loop', not both)
+        list                              - Show available pattern IDs
+        start                             - See command structure above
+        stop all                          - Stop all running patterns
+        stop <pattern_id>                 - Stop a running pattern
+  
+        status                            - Show thread status
+        status <s>                        - Post thread status every <s> seconds
+        stop status                       - Stop the status monitor
+  
+        test all patterns                 - Moves through all available patterns and attempts every CLI combination
+  
+        help                              - Show this help
+        exit                              - Exit the simulator
+  
+      Valid flow types:
+        consumer_to_consumer, consumer_to_cdn, consumer_to_service, cdn_to_consumer, cdn_to_cdn, cdn_to_service, service_to_consumer, service_to_cdn, service_to_service
+      
+  netsim> list
+  Available patterns:
+    - bgp
+    - dns_normal
+    - fsm_bgp_session
+    - fsm_gre_tunnel
+    - fsm_http
+    - fsm_https
+    - fsm_ipsec_tunnel
+    - fsm_quic_stream
+    - fsm_ssh
+    - fsm_tcp_session
+    - fsm_udp_session
+    - gre
+    - https_web_browse
+    - icmp_unreachable
+    - ipsec_isakmp
+    - ntp
+    - quic_video
+    - snmp
+    - ssh
+    - tcp_handshake
+    - udp_dns_frag
+  
+  Valid flow types:
+    - cdn_to_cdn
+    - cdn_to_consumer
+    - cdn_to_service
+    - consumer_to_cdn
+    - consumer_to_consumer
+    - consumer_to_service
+    - service_to_cdn
+    - service_to_consumer
+    - service_to_service
 ```
 
 ---
@@ -202,35 +260,18 @@ rm -rf venv
 
 ## 📬 Feedback & Contributions
 
-We welcome feedback and contributions! Please open an issue or submit a pull request on GitHub.
+We welcome feedback and contributions! 
+
+Please open an issue or submit a pull request on GitHub and remember the the license terms when doing so.
+
+We are especially looking for help with making better state machines / pattern related additions at this time.
 
 ---
-# License
-netsim is dual-licensed under the following terms:
+## 🛡 License
 
-### ✅ Non-Commercial Use License
+This project is dual-licensed:
 
-For non-commercial, academic, internal testing, and research use, this project is licensed under the:
+- **CC BY-NC 4.0** for non-commercial use (research, education, internal testing)
+- **Commercial license required** for resale, SaaS, integration, or monetized use of any kind
 
-**Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)**  
-See: https://creativecommons.org/licenses/by-nc/4.0/
-
----
-
-### 💼 Commercial Use
-
-Commercial use, resale, hosting as a service (SaaS), or integration into paid products **requires a commercial license**.
-
-To inquire about a commercial license, please contact:
-
-📧 legal@indubitableindustries.org
-
----
-
-### 🚫 Prohibited Uses
-
-The following are **explicitly forbidden**:
-- Use in commercial products or services without a license
-- Use for surveillance, attack simulation, unauthorized access, or any unethical behavior
-
-We welcome contributions, but reserve the right to deny or remove contributions that conflict with these terms.
+See [LICENSE.md](./LICENSE.md) for full terms.

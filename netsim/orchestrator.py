@@ -6,6 +6,7 @@ import random
 import traceback
 from pathlib import Path
 
+from netsim.utils    import get_config_path
 from netsim.pattern_registry import PATTERN_REGISTRY
 from netsim.engine import ReplayEngine, PatternLaunchSpec
 from netsim.internet_properties import build_asn_ip_map, choose_ip_pair, list_valid_flow_types
@@ -22,7 +23,7 @@ BATCH_LAUNCH_DELAY = 0.05  # Will become configurable later
 
 
 def load_timeline_config(filename="simulation_config.yaml"):
-    config_path = Path(__file__).parent / "config" / filename
+    config_path = get_config_path(filename)
     with config_path.open() as f:
         config = yaml.safe_load(f)
 
@@ -33,13 +34,36 @@ def load_timeline_config(filename="simulation_config.yaml"):
 def run_timeline(engine: ReplayEngine, timeline: list, default_flow: str = "consumer_to_cdn", speed_mode: bool = False):
     valid_flows = list_valid_flow_types()
     tracker = PatternTracker()
-    engine.tracker = tracker  # attach the tracker to the engine
+    engine.tracker = tracker
 
     log_with_tag(logger, logging.INFO, TAG, f"[startup] run_timeline() called with engine id={id(engine)}")
+    log_with_tag(logger, logging.DEBUG, TAG, f"[debug] Raw timeline entries: {timeline}")
+
+    def launch_batch_at(start_time, batch):
+        try:
+            if start_time > 0:
+                log_with_tag(logger, logging.INFO, TAG, f"[timeline-loop] Waiting until t+{start_time}s to launch batch of {len(batch)} pattern(s)...")
+                time.sleep(start_time)
+            else:
+                time.sleep(1)
+
+            log_with_tag(logger, logging.INFO, TAG, f"[timeline-loop] Launching batch at t+{start_time}s (patterns: {[s.pattern_id for s in batch]})")
+            for spec in batch:
+                try:
+                    time.sleep(BATCH_LAUNCH_DELAY)
+                    log_with_tag(logger, logging.DEBUG, TAG, f"[timeline-loop] Attempting to start '{spec.pattern_id}'")
+                    spec.start()
+                    tracker.mark_active(spec.pattern_id, spec)
+                    threading.Timer(spec.duration, lambda pid=spec.pattern_id: stop_wrapper(pid)).start()
+                    log_with_tag(logger, logging.DEBUG, TAG, f"[timeline-loop] {spec.pattern_id} is now active")
+                except Exception as spe:
+                    log_with_tag(logger, logging.ERROR, TAG, f"[timeline-loop] Failed to launch pattern {spec.pattern_id}: {spe}")
+                    traceback.print_exc()
+        except Exception as e:
+            log_with_tag(logger, logging.ERROR, TAG, f"[timeline-loop] Error launching batch at {start_time}s: {e}")
+            traceback.print_exc()
 
     def orchestrate():
-        log_with_tag(logger, logging.DEBUG, TAG, f"[debug] Raw timeline entries: {timeline}")
-
         try:
             log_with_tag(logger, logging.INFO, TAG, "[timeline-loop] Timeline orchestrator started.")
             asn_ip_map = build_asn_ip_map()
@@ -54,7 +78,8 @@ def run_timeline(engine: ReplayEngine, timeline: list, default_flow: str = "cons
                 duration = entry.get("duration", 60)
                 flow_type = entry.get("flow_type", default_flow)
                 kwargs = entry.get("kwargs", {})
-                log_with_tag(logger, logging.INFO, TAG, f"[timeline-loop] Adding pattern '{pattern_id}' at t+{start}s (duration: {duration}s)")
+
+                log_with_tag(logger, logging.INFO, TAG, f"[timeline-loop] Scheduling pattern '{pattern_id}' at t+{start}s (duration: {duration}s)")
 
                 if flow_type not in valid_flows:
                     log_with_tag(logger, logging.WARNING, TAG, f"[timeline-loop] Invalid flow_type '{flow_type}' — skipping pattern '{pattern_id}'")
@@ -66,9 +91,7 @@ def run_timeline(engine: ReplayEngine, timeline: list, default_flow: str = "cons
                     continue
 
                 src_ip, dst_ip = choose_ip_pair(flow_type)
-                full_kwargs = dict(kwargs)
-                full_kwargs["src_ip"] = src_ip
-                full_kwargs["dst_ip"] = dst_ip
+                full_kwargs = dict(kwargs, src_ip=src_ip, dst_ip=dst_ip)
 
                 if pattern_id.startswith("fsm_") and pattern_id != "fsm_bgp_session":
                     full_kwargs.setdefault("asn", random.choice(list(asn_ip_map.keys())))
@@ -90,51 +113,41 @@ def run_timeline(engine: ReplayEngine, timeline: list, default_flow: str = "cons
 
             for start_time in sorted(tracker.start_groups):
                 batch = tracker.get_specs_for_time(start_time)
+                threading.Thread(target=launch_batch_at, args=(start_time, batch), name=f"batch-t{start_time}", daemon=True).start()
+                log_with_tag(logger, logging.DEBUG, TAG,
+                             f"[timeline] At start_time={start_time}, batch: {tracker.get_specs_for_time(start_time)}")
 
-                def launch_batch_at(start=start_time, batch=batch):
-                    try:
-                        if start > 0:
-                            log_with_tag(logger, logging.INFO, TAG, f"[timeline-loop] Waiting until t+{start}s to launch batch of {len(batch)} pattern(s)...")
-                            time.sleep(start)
-                        else:
-                            time.sleep(1)
-
-                        log_with_tag(logger, logging.INFO, TAG, f"[timeline-loop] Launching batch at t+{start}s (patterns: {[s.pattern_id for s in batch]})")
-
-                        for spec in batch:
-                            try:
-                                time.sleep(BATCH_LAUNCH_DELAY)
-                                log_with_tag(logger, logging.DEBUG, TAG, f"[timeline-loop] Attempting to start '{spec.pattern_id}'")
-                                spec.start()
-                                tracker.mark_active(spec.pattern_id, spec)
-                                threading.Timer(spec.duration, lambda pid=spec.pattern_id: stop_wrapper(pid)).start()
-                                log_with_tag(logger, logging.DEBUG, TAG,
-                                             f"[timeline-loop] {spec.pattern_id} is now active")
-
-
-                            except Exception as spe:
-                                log_with_tag(logger, logging.ERROR, TAG, f"[timeline-loop] Failed to launch pattern {spec.pattern_id}: {spe}")
-                                traceback.print_exc()
-
-                    except Exception as e:
-                        log_with_tag(logger, logging.ERROR, TAG, f"[timeline-loop] Error launching batch at {start}s: {e}")
-                        import traceback
-                        traceback.print_exc()
-
-                threading.Thread(target=launch_batch_at, name=f"batch-t{start_time}").start()
+            log_with_tag(logger, logging.DEBUG, TAG, f"[timeline] Current tracker groups: {tracker.start_groups}")
 
         except Exception as loop_err:
             log_with_tag(logger, logging.ERROR, TAG, f"[timeline-loop] Orchestrator crashed: {loop_err}")
-            import traceback
             traceback.print_exc()
 
+    # Start orchestrator in background
+    threading.Thread(target=orchestrate, name="timeline-orchestrator", daemon=True).start()
+
+    # Add this at the bottom of orchestrate() temporarily
+    log_with_tag(logger, logging.INFO, TAG, f"[debug] Manually forcing pattern launch")
+
+    spec = PatternLaunchSpec(
+        pattern_id="tcp_handshake",
+        pattern_class=PATTERN_REGISTRY["tcp_handshake"],
+        kwargs={"src_ip": "192.0.2.1", "dst_ip": "192.0.2.2"},
+        shared_queue=engine.packet_queue,
+        stats_dict=engine.stats_dict,
+        pid_map=engine.pattern_pid_map,
+        delay=0,
+        duration=30,
+    )
+    spec.start()
+
+    # Define optional shutdown helper
     def force_shutdown():
         results = tracker.shutdown()
         for pid, result in results.items():
-            if result == "clean_exit":
-                log_with_tag(logger, logging.INFO, TAG, f"[shutdown] '{pid}' stopped cleanly.")
-            else:
-                log_with_tag(logger, logging.WARNING, TAG, f"[shutdown] '{pid}' stop result: {result}")
+            level = logging.INFO if result == "clean_exit" else logging.WARNING
+            log_with_tag(logger, level, TAG, f"[shutdown] '{pid}' stop result: {result}")
+
 
     def stop_wrapper(pat_id: str):
         result = tracker.stop_spec(pat_id)
