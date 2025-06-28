@@ -1,58 +1,40 @@
-name: Lint with Pylint
+name: Lint Python Code
 
 on:
   push:
     branches:
       - main
   pull_request:
-    branches:
-      - main
 
 jobs:
-  pylint:
+  pylint-test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.8, 3.9, 3.10, 3.11]
 
     steps:
-      # Step 1: Checkout the repository
-      - name: Checkout Code
-        uses: actions/checkout@v3
+    - name: Checkout Code
+      uses: actions/checkout@v3
 
-      # Step 2: Add Required Repositories
-      - name: Add Python PPA
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y software-properties-common
-          sudo add-apt-repository -y ppa:deadsnakes/ppa
-          sudo apt-get update
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
 
-      # Step 3: Install Python 3.10 and Related Tools
-      - name: Install Python 3.10
-        run: |
-          sudo apt-get install -y python3.10 python3.10-venv python3.10-distutils
-          python3.10 --version  # Verify installation
-   
-      # Step 3.5 - specify what version is known now....
-      - name: Debug Python Version
-        run: |
-          echo "Specified Python version: ${{ matrix.python-version }}"
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install pylint
 
-      # Step 4: Set up Python
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.10
+    - name: Run Pylint
+      run: |
+        echo "Linting Python files..."
+        pylint **/*.py || exit 1
 
-      # Step 5: Install dependencies
-      - name: Install dependencies
-        run: |
-          python -m venv venv
-          source venv/bin/activate
-          pip install --upgrade pip
-          pip install pylint
-          pip install -r requirements.txt
+    - name: Verify Python Version
+      run: python --version
 
-      # Step 6: Run Pylint on the codebase
-      - name: Run Pylint
-        run: |
-          source venv/bin/activate
-          pylint --rcfile=.pylintrc $(find . -name "*.py")
+    - name: Debug Python Version from Matrix
+      run: |
+        echo "Specified Python version: ${{ matrix.python-version }}"
