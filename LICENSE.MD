@@ -28,3 +28,4 @@ The following are **explicitly forbidden**:
 - Use for surveillance, attack simulation, unauthorized access, or any unethical behavior
 
 We welcome contributions, but reserve the right to deny or remove contributions that conflict with these terms.
+   
