@@ -27,6 +27,9 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install pylint
 
+    - name: Setup PYTHONPATH
+      run: export PYTHONPATH=$PYTHONPATH:$(pwd)
+
     - name: Run Pylint
       run: |
         echo "Linting Python files..."
