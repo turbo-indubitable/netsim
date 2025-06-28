@@ -23,6 +23,19 @@ BATCH_LAUNCH_DELAY = 0.05  # Configurable later
 
 
 def load_timeline_config(filename="simulation_config.yaml"):
+    """
+    Load simulation timeline configuration from a YAML file.
+
+    Reads and parses a YAML configuration file to extract the timeline of patterns
+    to be executed during the simulation.
+
+    Args:
+        filename (str): Name of the configuration file to load. Defaults to "simulation_config.yaml".
+
+    Returns:
+        list: A list of timeline entries, each representing a pattern to be executed.
+              Returns an empty list if no timeline is defined in the config.
+    """
     config_path = get_config_path(filename)
     with config_path.open() as f:
         config = yaml.safe_load(f)
@@ -32,6 +45,21 @@ def load_timeline_config(filename="simulation_config.yaml"):
 
 
 def run_timeline(engine: ReplayEngine, timeline: list, default_flow: str = "consumer_to_cdn", speed_mode: bool = False):
+    """
+    Execute a timeline of network patterns using the provided replay engine.
+
+    This function orchestrates the execution of a series of network patterns according to
+    a timeline configuration. It manages the scheduling, launching, and stopping of patterns
+    based on their specified start times and durations.
+
+    Args:
+        engine (ReplayEngine): The engine responsible for processing and sending packets
+        timeline (list): List of timeline entries, each specifying a pattern to execute
+        default_flow (str): Default flow type to use if not specified in a timeline entry.
+                           Defaults to "consumer_to_cdn".
+        speed_mode (bool): If True, only the first pattern in the timeline will be executed,
+                          which is useful for faster testing. Defaults to False.
+    """
     try:
         valid_flows = list_valid_flow_types()
         tracker = PatternTracker()
@@ -41,6 +69,15 @@ def run_timeline(engine: ReplayEngine, timeline: list, default_flow: str = "cons
         log_with_tag(logger, logging.DEBUG, TAG, f"[debug] Raw timeline entries: {timeline}")
 
         def stop_wrapper(pat_id: str):
+            """
+            Stop a running pattern and log the result.
+
+            This function is used as a callback for the timer that stops patterns
+            after their specified duration has elapsed.
+
+            Args:
+                pat_id (str): The ID of the pattern to stop
+            """
             result = tracker.stop_spec(pat_id)
             if result == "clean_exit":
                 log_with_tag(logger, logging.INFO, TAG, f"[timeline-loop] Stopped '{pat_id}' successfully.")
@@ -50,12 +87,33 @@ def run_timeline(engine: ReplayEngine, timeline: list, default_flow: str = "cons
                 log_with_tag(logger, logging.WARNING, TAG, f"[timeline-loop] Issue stopping '{pat_id}': {result}")
 
         def force_shutdown():
+            """
+            Force shutdown all active patterns and log the results.
+
+            This function is used to cleanly terminate all patterns that may still be
+            running, typically during system shutdown or when handling exceptions.
+
+            Returns:
+                None
+            """
             results = tracker.shutdown()
             for pid, result in results.items():
                 level = logging.INFO if result == "clean_exit" else logging.WARNING
                 log_with_tag(logger, level, TAG, f"[shutdown] '{pid}' stop result: {result}")
 
         def launch_batch_at(start_time: int, batch: list):
+            """
+            Launch a batch of patterns at a specific start time.
+
+            This function handles the actual launching of patterns that are scheduled
+            to start at the same time. It waits until the specified start time,
+            then launches each pattern in the batch with a small delay between them.
+
+            Args:
+                start_time (int): The time (in seconds from the beginning of execution)
+                                 when this batch should be launched
+                batch (list): List of PatternLaunchSpec objects to launch
+            """
             try:
                 if start_time > 0:
                     log_with_tag(logger, logging.INFO, TAG, f"[timeline-loop] Waiting until t+{start_time}s to launch batch of {len(batch)} pattern(s)...")
@@ -80,6 +138,16 @@ def run_timeline(engine: ReplayEngine, timeline: list, default_flow: str = "cons
                 traceback.print_exc()
 
         def orchestrate():
+            """
+            Main orchestration function that processes the timeline and schedules all patterns.
+
+            This function reads the timeline configuration, creates PatternLaunchSpec objects
+            for each entry, and schedules them to be launched at their specified start times.
+            It handles different pattern types, applies appropriate parameters, and organizes
+            patterns into batches based on their start times.
+
+            If speed_mode is enabled, only the first pattern in the timeline will be processed.
+            """
             try:
                 log_with_tag(logger, logging.INFO, TAG, "[timeline-loop] Timeline orchestrator started.")
                 print("[timeline-loop] Timeline orchestrator started.")

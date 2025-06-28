@@ -28,7 +28,33 @@ from rich.table import Table
 
 
 class Controller:
+    """
+    Main controller for the NetSim application.
+
+    The Controller provides a command-line interface for managing network pattern
+    simulations. It handles user commands, manages pattern lifecycle, and provides
+    status information about running patterns.
+
+    Key responsibilities:
+    - Parsing and executing user commands
+    - Starting/stopping network traffic patterns
+    - Monitoring and reporting pattern status
+    - Managing the simulation timeline
+    """
     def __init__(self, engine: ReplayEngine, mode: str = "yaml+interactive", speed_mode: bool = False, shared_queue=None, stats_dict=None, pid_map=None, tracker=None, **kwargs):
+        """
+        Initialize the NetSim Controller instance.
+
+        Args:
+            engine (ReplayEngine): The engine instance for packet handling
+            mode (str): Operating mode, default "yaml+interactive"
+            speed_mode (bool): If True, runs simulations faster by using only the FIRST YAML timeline pattern
+            shared_queue: Master Queue for packets, shared between processes, lives in its own thread
+            stats_dict: Shared dictionary for storing statistics
+            pid_map: Shared dictionary mapping pattern IDs to process IDs
+            tracker: Optional pattern tracker instance (a very good idea)
+            **kwargs: Additional keyword arguments
+        """
         self.engine = engine
         self.mode = mode
         self.speed_mode = speed_mode
@@ -59,6 +85,18 @@ class Controller:
             log_with_tag(logger, logging.DEBUG, "Controller", f"SPEED_MODE is enabled")
 
     def build_spec(self, pattern_id, pattern_class, kwargs, duration):
+        """
+        Build a pattern launch specification.
+
+        Args:
+            pattern_id: Identifier for the pattern
+            pattern_class: Class reference for the pattern to launch
+            kwargs: Dictionary of arguments to pass to the pattern
+            duration: How long the pattern should run in seconds
+
+        Returns:
+            PatternLaunchSpec: A specification object for launching the pattern
+        """
         log_with_tag(logger, logging.DEBUG, "Controller", f"[Controller] Building spec with shared queue {self.shared_queue}")
         return PatternLaunchSpec(
             pattern_id=pattern_id,
@@ -72,22 +110,48 @@ class Controller:
         )
 
     def setup_completion(self):
+        """
+        Configure command-line tab completion for the CLI.
+        Sets up the readline completer to enable tab completion for commands.
+        """
         readline.set_completer(self.completer)
         readline.parse_and_bind("tab: complete")
 
     def completer(self, text, state):
+        """
+        Command completion function for readline.
+
+        Args:
+            text (str): The text to complete
+            state (int): The state of completion (0 for first match, 1 for second, etc.)
+
+        Returns:
+            str or None: The matching command or None if no match
+        """
         options = [cmd for cmd in self.get_all_commands() if cmd.startswith(text)]
         if state < len(options):
             return options[state]
         return None
 
     def get_all_commands(self):
+        """
+        Get a list of all available commands for the CLI.
+
+        Returns:
+            list: A list containing all built-in commands and registered pattern names
+        """
         return (
                 ["play", "inject", "stop", "status", "help", "exit", "list", "patterns", "loop", "loglevel"]
                 + list(PATTERN_REGISTRY.keys())
         )
 
     def change_log_level(self, new_level: str):
+        """
+        Change the logging level for console output.
+
+        Args:
+            new_level (str): The new logging level to set (e.g., "DEBUG", "INFO", "WARNING")
+        """
         numeric = getattr(logging, new_level.upper(), None)
         if numeric is None:
             log_with_tag(logger, logging.WARN, "Controller", f"[loglevel] Invalid log level: {new_level}")
@@ -101,6 +165,13 @@ class Controller:
         log_with_tag(logger, logging.INFO, "Controller", f"{colored}[loglevel] Console log level set to {new_level.upper()}{reset}")
 
     def run(self):
+        """
+        Run the main command-line interface loop.
+
+        Starts the interactive CLI that accepts user commands until exit or interrupt.
+        Uses prompt_toolkit for enhanced input handling and patches stdout to allow
+        asynchronous output while waiting for input.
+        """
         session = PromptSession()
         p("netsim> Type 'help' for commands.")
         with patch_stdout():
@@ -115,11 +186,22 @@ class Controller:
                     self.running = False
 
     def print_thread_summary(self):
+        """
+        Print a summary of all active threads in the application.
+
+        Displays the name and alive status of each thread for debugging purposes.
+        """
         p("[debug] Active threads:")
         for t in threading.enumerate():
             p(f" - {t.name} (alive: {t.is_alive()})")
 
     def start_status_monitor(self, interval: int = 5):
+        """
+        Start a background thread that periodically displays pattern status.
+
+        Args:
+            interval (int): Number of seconds between status updates
+        """
         if hasattr(self, "_status_monitor_thread") and self._status_monitor_thread.is_alive():
             log_with_tag(logger, logging.INFO, "Controller", "Status monitor already running.")
             return
@@ -135,12 +217,31 @@ class Controller:
         self._status_monitor_thread.start()
 
     def stop_status_monitor(self):
+        """
+        Stop the background status monitor thread if it's running.
+
+        Signals the monitor thread to stop and waits for it to terminate.
+        """
         if hasattr(self, "_status_monitor_thread") and self._status_monitor_thread.is_alive():
             self._status_monitor_stop.set()
             self._status_monitor_thread.join()
             log_with_tag(logger, logging.DEBUG, "Controller", "Stopped status monitor thread.")
 
     def parse_start_command(self, tokens: list[str]) -> dict:
+        """
+        Parse the 'start' command arguments into a structured dictionary.
+
+        Handles command syntax like:
+        - start <pattern_id> in <delay> for <duration>
+        - start <pattern_id> loop <count>
+        - start <pattern_id> flow <flow_type>
+
+        Args:
+            tokens (list[str]): List of command tokens from user input
+
+        Returns:
+            dict or None: Dictionary of parsed arguments or None if parsing failed
+        """
         args = {
             "pattern_id": None,
             "delay": 0,
@@ -178,6 +279,15 @@ class Controller:
         return args
 
     def handle_command(self, cmd: str):
+        """
+        Parse and execute a command from the CLI.
+
+        Routes commands to appropriate handler methods based on the first token.
+        Uses local functions to handle complex commands that need access to tokens.
+
+        Args:
+            cmd (str): The command string from user input
+        """
         tokens = cmd.strip().split()
         if not tokens:
             return
@@ -234,9 +344,24 @@ class Controller:
             p(f"Unknown command: {cmd}")
 
     def _exit(self):
+        """
+        Exit the CLI by setting the running flag to False.
+        This will cause the main run loop to terminate.
+        """
         self.running = False
 
     def register_and_launch(self, pattern_id: str, flow_type: str = "default", duration: int = 60):
+        """
+        Register a pattern from the registry and launch it.
+
+        Args:
+            pattern_id (str): The ID of the pattern to launch
+            flow_type (str): The type of network flow to simulate
+            duration (int): How long the pattern should run in seconds
+
+        Returns:
+            None: Returns early if the pattern is not found
+        """
         pattern_class = PATTERN_REGISTRY.get(pattern_id)
         if not pattern_class:
             print(f"[red]Pattern ID '{pattern_id}' not found in registry.[/red]")
@@ -251,6 +376,19 @@ class Controller:
         self.tracker.mark_active(spec.pattern_id, spec)
 
     def start_pattern(self, pattern_id: str, duration: int = 60):
+        """
+        Start a pattern with default parameters.
+
+        Creates and launches a pattern with basic configuration. For FSM-based patterns,
+        adds necessary ASN parameters automatically.
+
+        Args:
+            pattern_id (str): The ID of the pattern to start
+            duration (int): How long the pattern should run in seconds
+
+        Returns:
+            None: Returns early if pattern is not found in registry
+        """
         pattern_class = PATTERN_REGISTRY.get(pattern_id)
         if not pattern_class:
             p(f"Pattern '{pattern_id}' not found.")
@@ -275,6 +413,17 @@ class Controller:
 
 
     def start_with_delay(self, pattern_id: str, delay: int, flow_type: str, duration: int = 60):
+        """
+        Start a pattern after a specified delay.
+
+        Creates a background thread that waits for the delay period before launching the pattern.
+
+        Args:
+            pattern_id (str): The ID of the pattern to start
+            delay (int): Seconds to wait before starting the pattern
+            flow_type (str): The type of network flow to simulate
+            duration (int): How long the pattern should run in seconds
+        """
         def runner():
             time.sleep(delay)
             self._launch_pattern(pattern_id, flow_type=flow_type, duration=duration)
@@ -282,6 +431,21 @@ class Controller:
         threading.Thread(target=runner, name=f"delay-{pattern_id}").start()
 
     def start_timed_injection(self, pattern_id: str, delay: int, duration: int, flow_type: str):
+        """
+        Start a pattern after a delay and automatically stop it after duration.
+
+        Creates a background thread that manages the entire lifecycle of the pattern:
+        1. Wait for delay period
+        2. Start the pattern
+        3. Wait for duration period
+        4. Stop the pattern
+
+        Args:
+            pattern_id (str): The ID of the pattern to inject
+            delay (int): Seconds to wait before starting the pattern
+            duration (int): How long to run the pattern before stopping
+            flow_type (str): The type of network flow to simulate
+        """
         def runner():
             time.sleep(delay)
             log_with_tag(logger, logging.INFO, "Controller", f"[inject] Starting '{pattern_id}' for {duration}s")
@@ -292,6 +456,22 @@ class Controller:
         threading.Thread(target=runner, name=f"inject-{pattern_id}").start()
 
     def loop_pattern(self, pattern_id: str, every: int, duration: int, total: int = None, limit: int = None):
+        """
+        Run a pattern repeatedly at fixed intervals.
+
+        Creates a thread that repeatedly starts and stops a pattern with fixed timing.
+        The loop can be bounded by either a total runtime or a maximum iteration count.
+
+        Args:
+            pattern_id (str): The ID of the pattern to loop
+            every (int): Interval between loop iterations in seconds
+            duration (int): How long each pattern iteration should run
+            total (int, optional): Total time in seconds to run the loop
+            limit (int, optional): Maximum number of iterations to run
+
+        Returns:
+            None: Returns early if the timing would cause pattern overlap
+        """
         if duration > every:
             log_with_tag(logger, logging.WARN, "Loop",
                          f"Invalid loop: duration ({duration}s) exceeds interval ({every}s) — would cause overlap.")
@@ -327,6 +507,17 @@ class Controller:
         thread.start()
 
     def inject_pattern(self, pattern_id: str, after: int, duration: int):
+        """
+        Inject a pattern for a fixed duration after a delay.
+
+        Similar to start_timed_injection but with different parameter naming.
+        Creates a thread that manages the entire lifecycle of the pattern.
+
+        Args:
+            pattern_id (str): The ID of the pattern to inject
+            after (int): Seconds to wait before starting the pattern
+            duration (int): How long to run the pattern before stopping
+        """
         def delayed_injection():
             time.sleep(after)
             log_with_tag(logger, logging.INFO, "Controller", f"Injecting pattern: {pattern_id}")
@@ -339,9 +530,31 @@ class Controller:
         thread.start()
 
     def _launch_pattern(self, pattern_id: str, flow_type: str = "default", duration: int = 60):
+        """
+        Internal method to launch a pattern.
+
+        A thin wrapper around register_and_launch that can be extended with additional logic.
+
+        Args:
+            pattern_id (str): The ID of the pattern to launch
+            flow_type (str): The type of network flow to simulate
+            duration (int): How long the pattern should run in seconds
+        """
         self.register_and_launch(pattern_id, flow_type, duration)
 
     def dispatch_start(self, args: dict):
+        """
+        Dispatch a pattern start request to the appropriate launch method.
+
+        Based on the provided arguments, determines whether to start the pattern:
+        - In a loop (if loop_count is specified)
+        - For a fixed duration (if duration is specified)
+        - After a delay (if delay > 0)
+        - Immediately (if no special timing is needed)
+
+        Args:
+            args (dict): Dictionary of arguments parsed from the start command
+        """
         pattern_id = args["pattern_id"]
         delay = args["delay"]
         duration = args["duration"]
@@ -385,11 +598,24 @@ class Controller:
             )
 
     def stop_pattern(self, pattern_id: str):
+        """
+        Stop a running pattern by its ID.
+
+        Instructs the engine to stop the pattern and updates the tracker.
+
+        Args:
+            pattern_id (str): The ID of the pattern to stop
+        """
         self.engine.stop_pattern(pattern_id)
         result = self.tracker.stop_spec(pattern_id)
         log_with_tag(logger, logging.INFO, "Controller", f"Stopped pattern {pattern_id}: {result}")
 
     def stop_all_patterns(self):
+        """
+        Stop all running patterns.
+
+        Instructs the tracker to shut down all active patterns and logs the results.
+        """
         results = self.tracker.shutdown()
         for pid, result in results.items():
             if result == "clean_exit":
@@ -398,6 +624,15 @@ class Controller:
                 log_with_tag(logger, logging.WARN, "Controller", f"[stop all] [!] WARN: '{pid}' stop result: {result}")
 
     def print_status_rich(self):
+        """
+        Generate a rich-formatted table showing pattern status.
+
+        Creates a table with columns for pattern ID, status, whether the pattern 
+        is still alive, and elapsed time since pattern start.
+
+        Returns:
+            Table: A rich.table.Table object that can be printed to the console
+        """
         table = Table(title="Pattern Status")
 
         table.add_column("Pattern ID", style="bold cyan")
@@ -423,6 +658,11 @@ class Controller:
         return table
 
     def summarized_status(self):
+        """
+        Display a summarized view of pattern statuses grouped by status type.
+
+        Counts how many patterns are in each status state and prints a compact summary.
+        """
         if not self.engine.pattern_status:
             log_with_tag(logger, logging.INFO, "Controller", f"No patterns launched yet.")
             return
@@ -436,6 +676,12 @@ class Controller:
             p(f" - {status:10}: {count}")
 
     def list_patterns(self):
+        """
+        List all available patterns and flow types.
+
+        Displays a sorted list of all registered pattern IDs and valid flow types
+        that can be used with the patterns.
+        """
         p("Available patterns:")
         for pid in sorted(PATTERN_REGISTRY.keys()):
             p(f"  - {pid}")
@@ -446,6 +692,12 @@ class Controller:
             p(f"  - {ft}")
 
     def test_all_patterns(self):
+        """
+        Test all registered patterns with different command variants.
+
+        Runs each pattern through all supported command formats to verify they work.
+        This is primarily used for testing the system's stability and correctness.
+        """
         pattern_ids = sorted(PATTERN_REGISTRY.keys())
         for pid in pattern_ids:
             log_with_tag(logger, logging.DEBUG, "Controller", f"\n[test] Starting basic tests for '{pid}'")
@@ -461,13 +713,19 @@ class Controller:
 
     def _run_test_variant(self, pattern_id: str, mode: str = "plain"):
         """
-        Simulates a CLI-style 'start' command with various combinations:
-        - plain
-        - for
-        - in
-        - loop
-        - in+for
-        - in+loop
+        Simulates a CLI-style 'start' command with various combinations.
+
+        Tests a specific pattern with different command variants:
+        - plain: Simple start with default parameters
+        - for: Start with a duration parameter
+        - in: Start with a delay parameter
+        - loop: Start with loop count parameter
+        - in+for: Start with both delay and duration
+        - in+loop: Start with both delay and loop count
+
+        Args:
+            pattern_id (str): The ID of the pattern to test
+            mode (str): The command variant to test
         """
         duration = 5 if self.speed_mode else 30
         delay = 2 if "in" in mode else 1
@@ -497,6 +755,12 @@ class Controller:
         finished.wait()
 
     def print_help(self):
+        """
+        Display help information about available commands.
+
+        Prints a formatted help message that includes command syntax,
+        available commands, and valid flow types.
+        """
         flow_types = ", ".join(list_valid_flow_types())
         p(f"""Available commands:
   start <pattern_id> [in <s>] [for <s> | loop <n>] [flow <type>] - Launch pattern (use either 'for' or 'loop', not both)

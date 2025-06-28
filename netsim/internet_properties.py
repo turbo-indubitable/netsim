@@ -1,4 +1,18 @@
 # netsim/utils/internet_properties.py
+"""
+Internet Properties Module
+
+This module provides functionality for working with realistic internet topology
+and IP address allocation. It contains a model of the internet divided into
+different categories (consumer ISPs, CDNs, and online services) with their
+associated ASNs and IP ranges.
+
+The module offers functions to:  
+- Generate network flows between different internet entities
+- Select random IP addresses from appropriate ranges
+- Map ASNs to their associated IP ranges
+- Create realistic network traffic patterns
+"""
 
 import ipaddress
 import random
@@ -147,12 +161,39 @@ internet_properties = {
 
 @functools.lru_cache(maxsize=None)
 def list_valid_flow_types(props_json: str = json.dumps(internet_properties)) -> list[str]:
+    """
+    Get a list of all valid flow types based on the internet properties configuration.
+
+    This function generates all possible combinations of source and destination
+    network types in the format 'source_to_destination' (e.g., 'consumer_to_cdn').
+    Results are cached using LRU cache for performance.
+
+    Args:
+        props_json (str): JSON string representation of internet properties.
+                          Defaults to the built-in internet_properties dictionary.
+
+    Returns:
+        list[str]: List of all valid flow type strings in the format 'source_to_destination'
+    """
     props = json.loads(props_json)
     keys = list(props.keys())
     return [f"{src}_to_{dst}" for src in keys for dst in keys]
 
 
 def choose_random_ip(ip_range: str) -> str:
+    """
+    Choose a random IP address from within the specified IP range.
+
+    This function selects a random usable IP address from the given range,
+    avoiding the network and broadcast addresses when possible.
+
+    Args:
+        ip_range (str): An IP network range in CIDR notation (e.g., '192.168.1.0/24')
+                        or a single IP address.
+
+    Returns:
+        str: A randomly selected IP address from the range as a string
+    """
     net = ipaddress.ip_network(ip_range, strict=False)
     first_ip = int(net.network_address)
     last_ip = int(net.broadcast_address)
@@ -165,6 +206,24 @@ def choose_random_ip(ip_range: str) -> str:
         return str(ipaddress.ip_address(rand_ip))
 
 def choose_internet_ip(source_type: str, name: str, props: dict = internet_properties) -> str:
+    """
+    Choose a random IP address from a specific internet entity's IP ranges.
+
+    This function selects a random IP address from the IP ranges associated with
+    a specific entity (e.g., 'Comcast' within 'consumer' type) in the internet
+    properties configuration.
+
+    Args:
+        source_type (str): The type of network entity (e.g., 'consumer', 'cdn', 'service')
+        name (str): The name of the specific entity within that type (e.g., 'Comcast', 'Cloudflare')
+        props (dict): Internet properties dictionary. Defaults to the built-in internet_properties.
+
+    Returns:
+        str: A randomly selected IP address as a string
+
+    Raises:
+        ValueError: If the source_type or name is not found in the properties
+    """
     if source_type not in props:
         raise ValueError(f"Invalid source_type: {source_type}")
     if name not in props[source_type]:
@@ -174,6 +233,24 @@ def choose_internet_ip(source_type: str, name: str, props: dict = internet_prope
     return choose_random_ip(ip_range)
 
 def choose_ip_pair(flow_type: str, props: dict = internet_properties) -> tuple[str, str]:
+    """
+    Choose a pair of source and destination IP addresses based on a flow type.
+
+    This function selects appropriate source and destination IP addresses based on
+    the specified flow type (e.g., 'consumer_to_cdn'). It randomly selects entities
+    from each category and then chooses random IPs from their ranges.
+
+    Args:
+        flow_type (str): The type of network flow in format 'source_to_destination'
+                        (e.g., 'consumer_to_cdn', 'service_to_consumer')
+        props (dict): Internet properties dictionary. Defaults to the built-in internet_properties.
+
+    Returns:
+        tuple[str, str]: A tuple containing (source_ip, destination_ip) as strings
+
+    Raises:
+        ValueError: If the flow_type format is invalid or contains unknown types
+    """
     parts = flow_type.lower().split("_to_")
     if len(parts) != 2:
         raise ValueError(f"Invalid flow_type '{flow_type}', expected format 'source_to_target'")
@@ -189,6 +266,19 @@ def choose_ip_pair(flow_type: str, props: dict = internet_properties) -> tuple[s
     return src_ip, dst_ip
 
 def build_asn_ip_map(props: dict = internet_properties) -> dict[int, list[str]]:
+    """
+    Build a mapping of ASN numbers to their associated IP ranges.
+
+    This function processes the internet properties configuration and creates a
+    dictionary that maps each Autonomous System Number (ASN) to a list of all
+    IP ranges associated with that ASN across all entity types.
+
+    Args:
+        props (dict): Internet properties dictionary. Defaults to the built-in internet_properties.
+
+    Returns:
+        dict[int, list[str]]: A dictionary mapping ASN numbers (as integers) to lists of IP ranges
+    """
     asn_ip_map = defaultdict(list)
     for group in props.values():
         for entry in group.values():
