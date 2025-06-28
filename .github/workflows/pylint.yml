@@ -1,7 +1,6 @@
 name: Lint with Pylint
 
 on:
-  # Run this workflow on pushes and pull requests to the default branch
   push:
     branches:
       - main
@@ -11,30 +10,37 @@ on:
 
 jobs:
   pylint:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
-    # Step 1: Checkout the repository
-    - name: Checkout Code
-      uses: actions/checkout@v3
+      # Step 1: Checkout the repository
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-    # Step 2: Set up Python
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.10
+      # Step 2: Manually Install Python 3.10
+      - name: Install Python 3.10
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3.10 python3.10-venv python3.10-distutils
+          python3.10 --version  # Verify installation
 
-    # Step 3: Install dependencies
-    - name: Install dependencies
-      run: |
-        python -m venv venv
-        source venv/bin/activate
-        pip install --upgrade pip
-        pip install -r requirements.txt  # Install project dependencies
-        pip install pylint               # Install pylint
+      # Step 3: Set up Python in the environment
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.10
 
-    # Step 4: Run Pylint on the codebase
-    - name: Run Pylint
-      run: |
-        source venv/bin/activate
-        pylint --rcfile=.pylintrc $(find . -name "*.py")  # Lint all Python files
+      # Step 4: Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install pylint
+          pip install -r requirements.txt
+
+      # Step 5: Run Pylint on the codebase
+      - name: Run Pylint
+        run: |
+          source venv/bin/activate
+          pylint --rcfile=.pylintrc $(find . -name "*.py")
