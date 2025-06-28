@@ -9,7 +9,14 @@ from netsim.state.ssh_fsm import SSHSessionFSM
 from netsim.state.udp_fsm import UDPSession
 from netsim.utils import send_tcp_handshake, send_tcp_exchange, pick_ephemeral_port
 
-from scapy.all import IP, TCP, UDP, ICMP, Raw, RandShort, RandIP
+
+from netsim.internet_properties import choose_ip_pair
+from netsim.utils import pick_ephemeral_port
+
+
+from scapy.all import IP, TCP, UDP, ICMP, Raw
+from scapy.layers.dns import DNS, DNSQR, DNSRR
+
 from .base import BasePattern
 import time
 import random
@@ -22,36 +29,62 @@ class TCPHandshakePattern(BasePattern):
     def generate(self, **kwargs):
         assert self.src_ip is not None, "src_ip missing"
         assert self.dst_ip is not None, "dst_ip missing"
-        sport = RandShort()
-        base = IP(src=self.src_ip, dst=self.dst_ip)
-        yield base / TCP(sport=sport, dport=80, flags="S", seq=1000)
-        time.sleep(0.2)
-        base = IP(src=self.dst_ip, dst=self.src_ip)
-        yield base / TCP(sport=sport, dport=80, flags="SA", seq=2000, ack=1001)
-        time.sleep(0.2)
-        base = IP(src=self.src_ip, dst=self.dst_ip)
-        yield base / TCP(sport=sport, dport=80, flags="A", seq=1001, ack=2001)
+        sport = pick_ephemeral_port()
+
+        yield self.pkt_tcp(self.src_ip, self.dst_ip, sport, 80, "S", seq=1000)
+        time.sleep(0.01)
+        yield self.pkt_tcp(self.dst_ip, self.src_ip, 80, sport, "SA", seq=2000, ack=1001)
+        time.sleep(0.01)
+        yield self.pkt_tcp(self.src_ip, self.dst_ip, sport, 80, "A", seq=1001, ack=2001)
+        time.sleep(0.01)
 
 class TCPRSTStormPattern(BasePattern):
     name = "tcp_rst_storm"
 
     def generate(self, **kwargs):
-        base = IP(src=self.src_ip, dst=self.dst_ip)
         for _ in self.controlled_loop():
-            yield base / TCP(sport=RandShort(), dport=80, flags="R", seq=random.randint(1000, 5000))
+            yield self.pkt_tcp(self.src_ip, self.dst_ip, 80, 30895, "R", seq=random.randint(1000, 5000))
 
 class OutOfOrderTCPPattern(BasePattern):
     name = "out_of_order_tcp"
 
     def generate(self, **kwargs):
-        base = IP(src=self.src_ip, dst=self.dst_ip)
-        sport = RandShort()
+        sport = pick_ephemeral_port()
+        dport = 80
+        delay = self.kwargs.get("delay", 0.1)
+
+        # Out-of-order sequence numbers: second packet is "missing"
         seqs = [2001, 1001, 3001]
+        ack_expected = 1001  # Receiver will ask for this until it gets it
+
         for seq in seqs:
             if not self.running:
                 break
-            yield base / TCP(sport=sport, dport=80, flags="PA", seq=seq) / Raw(b"data")
-            time.sleep(self.kwargs.get("delay", 0.1))
+
+            # Send out-of-order data from client
+            yield self.pkt_tcp(
+                self.src_ip, self.dst_ip, dport, sport, "PA", seq=seq, ack=0
+            ) / Raw(b"data")
+            time.sleep(delay)
+
+            # Receiver responds with duplicate ACK for expected seq = 1001
+            yield self.pkt_tcp(
+                self.dst_ip, self.src_ip, sport, dport, "A", seq=5000, ack=ack_expected
+            )
+            time.sleep(delay)
+
+        # Now send the missing packet to fix it
+        if self.running:
+            yield self.pkt_tcp(
+                self.src_ip, self.dst_ip, dport, sport, "PA", seq=1001, ack=0
+            ) / Raw(b"final")
+            time.sleep(delay)
+
+            # Receiver now acknowledges the final in-order byte
+            yield self.pkt_tcp(
+                self.dst_ip, self.src_ip, sport, dport, "A", seq=5000, ack=4000
+            )
+            time.sleep(delay)
 
 # -------- UDP / DNS --------
 
@@ -59,29 +92,35 @@ class UDPDNSFragmentedPattern(BasePattern):
     name = "udp_dns_frag"
 
     def generate(self, **kwargs):
-        frag_count = self.kwargs.get("frag_count", 2)
-        ip_id = random.randint(10000, 20000)
-        base = IP(src=self.src_ip, dst=self.dst_ip, id=ip_id)
-        udp = UDP(sport=RandShort(), dport=53)
-        payload = Raw(b"X" * 1500)
+        frag_count = self.kwargs.get("frag_count", 3)
+        fragment_size = 1480
+        payload = b"X" * (frag_count * fragment_size)
 
-        # First fragment
-        yield base.copy() / udp / payload
-        time.sleep(0.1)
-
-        # Additional fragments
-        for i in range(1, frag_count):
-            frag_offset = 185 * i
-            yield IP(src=self.src_ip, dst=self.dst_ip, id=ip_id, frag=frag_offset) / Raw(b"Y" * 100)
-            time.sleep(0.1)
+        for frag in self.pkt_udp(
+            self.src_ip,
+            self.dst_ip,
+            dport=53,
+            payload=payload,
+            fragment_size=fragment_size,
+            auto_fragment=True
+        ):
+            yield frag
+            time.sleep(0.05)
 
 
 class UDPKeepAlivePattern(BasePattern):
     name = "udp_keepalive"
 
     def generate(self, **kwargs):
+        dport = self.kwargs.get("port", 12345)
         for _ in self.controlled_loop():
-            yield IP(src=self.src_ip, dst=self.dst_ip) / UDP(sport=RandShort(), dport=12345) / Raw(b"keep")
+            yield self.pkt_udp(
+                self.src_ip,
+                self.dst_ip,
+                dport=dport,
+                payload=b"keep-alive"
+            )
+            time.sleep(0.1)
 
 # -------- ICMP --------
 
@@ -89,8 +128,12 @@ class ICMPUnreachablePattern(BasePattern):
     name = "icmp_unreachable"
 
     def generate(self, **kwargs):
-        for _ in self.controlled_loop():
-            yield IP(src=self.src_ip, dst=self.dst_ip) / ICMP(type=3, code=3)
+        yield self.pkt_icmp(self.src_ip, self.dst_ip, icmp_type=3, icmp_code=3)  # Port unreachable
+        yield self.pkt_icmp(self.src_ip, self.dst_ip, icmp_type=3, icmp_code=3)  # Port unreachable
+        yield self.pkt_icmp(self.src_ip, self.dst_ip, icmp_type=3, icmp_code=3)  # Port unreachable
+        yield self.pkt_icmp(self.src_ip, self.dst_ip, icmp_type=3, icmp_code=3)  # Port unreachable
+
+
 
 # -------- Protocols --------
 
@@ -98,39 +141,66 @@ class NTPPattern(BasePattern):
     name = "ntp"
 
     def generate(self, **kwargs):
-        yield IP(src=self.src_ip, dst=self.dst_ip) / UDP(dport=123, sport=RandShort()) / Raw(b"\x1b" + b"\0" * 47)
+        ntp_payload = b"\x1b" + b"\0" * 47
+        yield self.pkt_udp(
+            self.src_ip,
+            self.dst_ip,
+            dport=123,
+            payload=ntp_payload
+        )
 
 class SNMPPattern(BasePattern):
     name = "snmp"
 
     def generate(self, **kwargs):
-        yield IP(src=self.src_ip, dst=self.dst_ip) / UDP(dport=161, sport=RandShort()) / Raw(b"\x30\x26")
+        snmp_payload = b"\x30\x26\x02\x01\x01\x04\x06public\xa0\x19\x02\x04\x71\xb6\x2e\x31" \
+                       b"\x02\x01\x00\x02\x01\x00\x30\x0b\x30\x09\x06\x05\x2b\x06\x01\x02\x01\x05"
+        yield self.pkt_udp(
+            self.src_ip,
+            self.dst_ip,
+            dport=161,
+            payload=snmp_payload
+        )
 
-class BGPPattern(BasePattern):
-    name = "bgp"
+class DNSQueryPattern(BasePattern):
+    name = "dns_query"
 
     def generate(self, **kwargs):
-        yield IP(src=self.src_ip, dst=self.dst_ip, proto=6) / TCP(sport=179, dport=179, flags="S")
+        num_queries = self.kwargs.get("num_queries", 5)
+        for _ in range(num_queries):
+            src_ip = self.choose_random_src_ip()
+            query_name = f"example{random.randint(100,999)}.com"
+            sport = pick_ephemeral_port()
+            txn_id = random.randint(0, 65535)
+
+            query = DNS(id=txn_id, rd=1, qd=DNSQR(qname=query_name))
+            response = DNS(
+                id=txn_id, qr=1, aa=1, qd=DNSQR(qname=query_name),
+                an=DNSRR(rrname=query_name, ttl=60, rdata="93.184.216.34")
+            )
+
+            yield self.pkt_udp(src_ip, self.dst_ip, sport=sport, dport=53, payload=bytes(query))
+            time.sleep(0.05)
+            yield self.pkt_udp(self.dst_ip, src_ip, sport=53, dport=sport, payload=bytes(response))
+            time.sleep(0.05)
+
+    def choose_random_src_ip(self) -> str:
+        src_ip, _ = choose_ip_pair("consumer_to_service")
+        return src_ip
 
 class GREPattern(BasePattern):
     name = "gre"
 
     def generate(self, **kwargs):
         inner = IP(src="192.168.1.1", dst="10.0.0.1") / ICMP()
-        yield IP(src=self.src_ip, dst=self.dst_ip, proto=47) / Raw(bytes(inner))
+        yield self.pkt_gre(self.src_ip, self.dst_ip, inner_pkt=inner)
 
 class IPSECISAKMPPattern(BasePattern):
     name = "ipsec_isakmp"
 
     def generate(self, **kwargs):
-        yield IP(src=self.src_ip, dst=self.dst_ip, proto=50) / Raw(b"isakmp")
-        yield IP(src=self.src_ip, dst=self.dst_ip, proto=51) / Raw(b"authhdr")
-
-class SSHPattern(BasePattern):
-    name = "ssh"
-
-    def generate(self, **kwargs):
-        yield IP(src=self.src_ip, dst=self.dst_ip) / TCP(sport=RandShort(), dport=22, flags="S")
+        yield self.pkt_ipsec(self.src_ip, self.dst_ip, proto=50, payload=b"isakmp")
+        yield self.pkt_ipsec(self.src_ip, self.dst_ip, proto=51, payload=b"authhdr")
 
 # -------- App Simulation --------
 
@@ -138,25 +208,39 @@ class HTTPSWebBrowsePattern(BasePattern):
     name = "https_web_browse"
 
     def generate(self, **kwargs):
-        sport = RandShort()
-        base = IP(src=self.src_ip, dst=self.dst_ip)
-        yield base / TCP(sport=sport, dport=443, flags="S", seq=1000)
-        yield base / TCP(sport=sport, dport=443, flags="SA", seq=2000, ack=1001)
-        yield base / TCP(sport=sport, dport=443, flags="A", seq=1001, ack=2001)
-        yield base / TCP(sport=sport, dport=443, flags="PA", seq=1001, ack=2001) / Raw(b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+        sport = pick_ephemeral_port()
+        yield self.pkt_tcp(self.src_ip, self.dst_ip, sport=sport, dport=443, flags="S", seq=1000)
+        yield self.pkt_tcp(self.dst_ip, self.src_ip, sport=443, dport=sport, flags="SA", seq=2000, ack=1001)
+        yield self.pkt_tcp(self.src_ip, self.dst_ip, sport=sport, dport=443, flags="A", seq=1001, ack=2001)
+        yield self.pkt_tcp(self.src_ip, self.dst_ip, sport=sport, dport=443, flags="PA", seq=1001, ack=2001,
+                           payload=b"GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
 
 class DNSNormalPattern(BasePattern):
     name = "dns_normal"
 
     def generate(self, **kwargs):
-        yield IP(src=self.src_ip, dst=self.dst_ip) / UDP(sport=RandShort(), dport=53) / Raw(b"\xaa\xbb\x01\x00\x00\x01")
+        flow_type = kwargs.get("flow_type", "consumer_to_service")
+        src_ip, dst_ip = choose_ip_pair(flow_type)
+
+        payloadbase = b"\xaa\xbb\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+        payloadbase += b'\x03www\x07example\x03com\x00\x00\x01\x00\x01'
+
+        yield self.pkt_udp(
+            src_ip=src_ip,
+            dst_ip=dst_ip,
+            sport=pick_ephemeral_port(),
+            dport=53,
+            payload=payloadbase
+        )
 
 class QUICVideoPattern(BasePattern):
     name = "quic_video"
 
     def generate(self, **kwargs):
         for _ in self.controlled_loop(count=5):
-            yield IP(src=self.src_ip, dst=self.dst_ip) / UDP(sport=RandShort(), dport=443) / Raw(b"quic-stream-data")
+            yield self.pkt_udp(self.src_ip, self.dst_ip,
+                               sport=pick_ephemeral_port(), dport=443,
+                               payload=b"quic-stream-data")
 
 # -----  FSM's -------#
 # Statefulness is applied via an external library
@@ -169,26 +253,17 @@ class FSMTCPSessionPattern(BasePattern):
     name = "fsm_tcp_session"
     accepts_kwargs = True
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.kwargs = kwargs
-
     def generate(self):
-        class_name = self.__class__.__name__
-        label = class_name.removeprefix("FSM").removesuffix("Pattern").lower()
-        print(f"[FSM-{label}] Building.")
-
+        print("[FSM-tcp_session] Building.")
         packets = []
         sport = pick_ephemeral_port()
         dport = 443
         seq = 10000
 
-        # Handshake
         seq, ack = send_tcp_handshake(
             packets, self.src_ip, self.dst_ip, sport, dport, seq_start=seq
         )
 
-        # TCP Exchange with kwargs from YAML
         send_tcp_exchange(
             packets,
             self.src_ip,
@@ -202,8 +277,6 @@ class FSMTCPSessionPattern(BasePattern):
             payload_range=tuple(self.kwargs.get("payload_range", (200, 1400))),
             jitter=self.kwargs.get("jitter", 0.0)
         )
-        print(f"[FSMTCPSessionPattern] generate() called with kwargs: {self.kwargs}")
-
         for pkt in packets:
             self.send_packet(pkt)
 
@@ -212,15 +285,8 @@ class FSMUDPSessionPattern(BasePattern):
     name = "fsm_udp_session"
     accepts_kwargs = True
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.kwargs = kwargs
-
     def generate(self):
-        class_name = self.__class__.__name__
-        label = class_name.removeprefix("FSM").removesuffix("Pattern").lower()
-        print(f"[FSM-{label}] Building.")
-
+        print("[FSM-udp_session] Building.")
         sess = UDPSession(
             src_ip=self.src_ip,
             dst_ip=self.dst_ip,
@@ -229,7 +295,6 @@ class FSMUDPSessionPattern(BasePattern):
             payload_size=self.kwargs.get("payload_size", 60)
         )
         sess.simulate_flow()
-        print(f"[FSMUDPSessionPattern] generate() called with kwargs: {self.kwargs}")
         for pkt in sess.get_packets():
             self.send_packet(pkt)
 
@@ -237,10 +302,6 @@ class FSMUDPSessionPattern(BasePattern):
 class FSMQUICSessionPattern(BasePattern):
     name = "fsm_quic_stream"
     accepts_kwargs = True
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.kwargs = kwargs
 
     def generate(self):
         print("[FSM-quic_stream] Building.")
@@ -256,7 +317,6 @@ class FSMQUICSessionPattern(BasePattern):
             burst_count=self.kwargs.get("burst_count", 10)
         )
         sess.simulate_stream()
-        print(f"[FSMQUICSessionPattern] generate() called with kwargs: {self.kwargs}")
         for pkt in sess.get_packets():
             self.send_packet(pkt)
 
@@ -264,10 +324,6 @@ class FSMQUICSessionPattern(BasePattern):
 class FSMGRESessionPattern(BasePattern):
     name = "fsm_gre_tunnel"
     accepts_kwargs = True
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.kwargs = kwargs
 
     def generate(self):
         print("[FSM-gre_tunnel] Building.")
@@ -282,17 +338,13 @@ class FSMGRESessionPattern(BasePattern):
             burst_count=self.kwargs.get("burst_count", 5)
         )
         sess.simulate_tunnel()
-        print(f"[FSMGRESessionPattern] generate() called with kwargs: {self.kwargs}")
         for pkt in sess.get_packets():
             self.send_packet(pkt)
+
 
 class FSMIPsecSessionPattern(BasePattern):
     name = "fsm_ipsec_tunnel"
     accepts_kwargs = True
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.kwargs = kwargs
 
     def generate(self):
         print("[FSM-ipsec_tunnel] Building.")
@@ -308,17 +360,13 @@ class FSMIPsecSessionPattern(BasePattern):
             mode=self.kwargs.get("mode", "esp_only")
         )
         sess.simulate_tunnel()
-        print(f"[FSMIPsecSessionPattern] generate() called with kwargs: {self.kwargs}")
         for pkt in sess.get_packets():
             self.send_packet(pkt)
+
 
 class FSMBGPSessionPattern(BasePattern):
     name = "fsm_bgp_session"
     accepts_kwargs = True
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.kwargs = kwargs
 
     def generate(self):
         print("[FSM-bgp_session] Building.")
@@ -331,17 +379,13 @@ class FSMBGPSessionPattern(BasePattern):
             keepalive_interval=self.kwargs.get("keepalive_interval", 30)
         )
         sess.simulate_session()
-        print(f"[FSMBGPSessionPattern] generate() called with kwargs: {self.kwargs}")
         for pkt in sess.get_packets():
             self.send_packet(pkt)
+
 
 class FSMHTTPPattern(BasePattern):
     name = "fsm_http"
     accepts_kwargs = True
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.kwargs = kwargs
 
     def generate(self):
         print("[FSM-http] Building.")
@@ -355,17 +399,13 @@ class FSMHTTPPattern(BasePattern):
             payload_size_range=self.kwargs.get("payload_size_range", (200, 1400))
         )
         sess.simulate_session()
-        print(f"[FSMHTTPPattern] generate() called with kwargs: {self.kwargs}")
         for pkt in sess.get_packets():
             self.send_packet(pkt)
+
 
 class FSMHTTPSPattern(BasePattern):
     name = "fsm_https"
     accepts_kwargs = True
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.kwargs = kwargs
 
     def generate(self):
         print("[FSM-https] Building.")
@@ -379,17 +419,13 @@ class FSMHTTPSPattern(BasePattern):
             payload_size_range=self.kwargs.get("payload_size_range", (200, 1400))
         )
         sess.simulate_session()
-        print(f"[FSMHTTPSPattern] generate() called with kwargs: {self.kwargs}")
         for pkt in sess.get_packets():
             self.send_packet(pkt)
+
 
 class FSMSSHPattern(BasePattern):
     name = "fsm_ssh"
     accepts_kwargs = True
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.kwargs = kwargs
 
     def generate(self):
         print("[FSM-ssh] Building.")
@@ -400,6 +436,5 @@ class FSMSSHPattern(BasePattern):
             interactive=self.kwargs.get("interactive", True)
         )
         sess.simulate_session()
-        print(f"[FSMSSHPattern] generate() called with kwargs: {self.kwargs}")
         for pkt in sess.get_packets():
             self.send_packet(pkt)

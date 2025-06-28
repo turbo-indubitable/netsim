@@ -76,7 +76,7 @@ class LoggingManager:
     def __init__(self, config_path=None):
         # Default values
         default_log_file = "netsim_run.log"
-        default_console_level = "INFO"
+        default_console_level = "DEBUG"
         default_max_bytes = 10 * 1024 * 1024  # 10 MB
         default_backup_count = 3
 

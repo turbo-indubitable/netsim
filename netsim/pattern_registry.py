@@ -8,10 +8,8 @@ from netsim.patterns.patterns import (
     SNMPPattern,
     GREPattern,
     IPSECISAKMPPattern,
-    SSHPattern,
     HTTPSWebBrowsePattern,
     DNSNormalPattern,
-    BGPPattern,
     QUICVideoPattern
 )
 from netsim.patterns.patterns import (FSMUDPSessionPattern, FSMTCPSessionPattern, FSMQUICSessionPattern,
@@ -26,10 +24,8 @@ PATTERN_CLASSES = [
     SNMPPattern,
     GREPattern,
     IPSECISAKMPPattern,
-    SSHPattern,
     HTTPSWebBrowsePattern,
     DNSNormalPattern,
-    BGPPattern,
     QUICVideoPattern,
     FSMTCPSessionPattern,
     FSMUDPSessionPattern,

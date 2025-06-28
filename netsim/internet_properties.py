@@ -2,6 +2,9 @@
 
 import ipaddress
 import random
+import functools
+import json
+from collections import defaultdict
 
 internet_properties = {
     "consumer": {
@@ -142,14 +145,24 @@ internet_properties = {
     }
 }
 
-def list_valid_flow_types(props: dict = internet_properties) -> list[str]:
-    """Return all valid combinations of flow_type strings."""
+@functools.lru_cache(maxsize=None)
+def list_valid_flow_types(props_json: str = json.dumps(internet_properties)) -> list[str]:
+    props = json.loads(props_json)
     keys = list(props.keys())
     return [f"{src}_to_{dst}" for src in keys for dst in keys]
 
+
 def choose_random_ip(ip_range: str) -> str:
     net = ipaddress.ip_network(ip_range, strict=False)
-    return str(random.choice(list(net.hosts())))
+    first_ip = int(net.network_address)
+    last_ip = int(net.broadcast_address)
+
+    if last_ip - first_ip <= 1:
+        # Not enough room for a usable random IP, just return the network address
+        return str(net.network_address)
+    else:
+        rand_ip = random.randint(first_ip + 1, last_ip - 1)
+        return str(ipaddress.ip_address(rand_ip))
 
 def choose_internet_ip(source_type: str, name: str, props: dict = internet_properties) -> str:
     if source_type not in props:
@@ -176,16 +189,14 @@ def choose_ip_pair(flow_type: str, props: dict = internet_properties) -> tuple[s
     return src_ip, dst_ip
 
 def build_asn_ip_map(props: dict = internet_properties) -> dict[int, list[str]]:
-    """Build a mapping from ASN number to a list of associated IP ranges from all top-level categories."""
-    asn_ip_map = {}
+    asn_ip_map = defaultdict(list)
     for group in props.values():
         for entry in group.values():
+            ip_ranges = entry.get("ip_ranges", [])
             for asn_str in entry.get("asn", []):
                 try:
                     asn = int(asn_str.replace("AS", ""))
+                    asn_ip_map[asn].extend(ip_ranges)
                 except ValueError:
                     continue
-                if asn not in asn_ip_map:
-                    asn_ip_map[asn] = []
-                asn_ip_map[asn].extend(entry.get("ip_ranges", []))
-    return asn_ip_map
+    return dict(asn_ip_map)

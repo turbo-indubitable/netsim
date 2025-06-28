@@ -5,6 +5,8 @@ import traceback
 from netsim.pattern_registry import PATTERN_REGISTRY
 from netsim.utils import safe_instantiate_pattern
 from prompt_toolkit import print_formatted_text as p
+import time
+
 
 
 def runner_entrypoint(
@@ -56,7 +58,11 @@ def runner_entrypoint(
         # Packet generation and queueing
         print(f"[runner:{pattern_id}] Entering generate()...")
         for pkt in pattern.generate():
-            print(f"[runner:{pattern_id}] Yielded: {pkt.summary()}")
+            if isinstance(pkt, list):
+                for i, subpkt in enumerate(pkt):
+                    print(f"[runner:{pattern_id}] Yielded[{i}]: {subpkt.summary()}")
+            else:
+                print(f"[runner:{pattern_id}] Yielded: {pkt.summary()}")
 
             if shared_queue is not None:
                 try:
@@ -66,6 +72,8 @@ def runner_entrypoint(
                     p(f"[runner:{pattern_id}] Failed to enqueue packet: {e}")
             else:
                 p(f"[runner:{pattern_id}] No queue: dropping packet {pkt}")
+
+            time.sleep(0.001)
 
         if stats_dict is not None:
             stats_dict[pattern_id]["status"] = "finished"

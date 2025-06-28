@@ -81,7 +81,7 @@ def main():
     log_with_tag(logger, logging.INFO, "Main", "🚀 NetSim CLI main() starting up")
 
     run_mode_ = "yaml+interactive"
-    speed_mode_ = False
+    speed_mode_ = True
     output_mode_ = "send"
     iface_ = "lo"
 
@@ -104,6 +104,7 @@ def main():
         timeline = load_timeline_config()
         log_with_tag(logger, logging.INFO, "Main", f"[DEBUG] Parsed timeline entries: {timeline}")
         log_with_tag(logger, logging.INFO, "Main", format_timeline(timeline))
+        print(">>>> RUN_TIMELINE THREAD LAUNCHING")
         threading.Thread(
             target=run_timeline,
             args=(engine, timeline),

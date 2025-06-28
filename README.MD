@@ -250,6 +250,36 @@ Sample output and commands:
     - service_to_consumer
     - service_to_service
 ```
+---
+## Advanced Use
+### Pattern Creation and Programming Notes:
+You should be careful when developing patterns, but the general procedure is fairly simple.
+Base.py contains the "BasePattern" and methods to send, attach shared packet queue's, and handle other arguments.
+Patterns.py contains the individual patterns, all of which are instantiations of the BasePattern class from Base.py.
+
+This allows you to develop patterns like so as helpers and other methods are contained all on BasePattern:
+```
+class TCPHandshakePattern(BasePattern):
+    name = "tcp_handshake"
+
+    def generate(self, **kwargs):
+        assert self.src_ip is not None, "src_ip missing"
+        assert self.dst_ip is not None, "dst_ip missing"
+        sport = pick_ephemeral_port()
+
+        yield self.pkt_tcp(self.src_ip, self.dst_ip, sport, 80, "S", seq=1000)
+        time.sleep(0.01)
+        yield self.pkt_tcp(self.dst_ip, self.src_ip, 80, sport, "SA", seq=2000, ack=1001)
+        time.sleep(0.01)
+        yield self.pkt_tcp(self.src_ip, self.dst_ip, sport, 80, "A", seq=1001, ack=2001)
+        time.sleep(0.01)
+```
+
+So long as you additionally register the pattern names in pattern_tracker.py, and add them to the help in ctonroller.py - you should be able to trigger them via YAML or CLI manual command by name.
+
+### Other Notes:
+- You must sleep during packet creation slightly or packets will appear out of order once the sender picks them up and shoves them down the line.
+- Delay may vary per system, but this is also an exploitable "Feature" if you would prefer out of order randomness in a patterns send.  Simply omit sleeps.
 
 ---
 

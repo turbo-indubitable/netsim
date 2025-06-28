@@ -27,7 +27,7 @@ def packet_sender_worker(queue, iface):
             break
         try:
             log("DEBUG", f"[worker] Sending: {pkt.summary()}")
-            sendp(pkt, iface=iface, verbose=False)
+            sendp(pkt, iface=iface, verbose=True)
         except Exception as e:
             log("ERROR", f"[worker] Error sending packet: {e}")
 
