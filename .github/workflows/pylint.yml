@@ -1,23 +1,40 @@
-name: Pylint
+name: Lint with Pylint
 
-on: [push]
+on:
+  # Run this workflow on pushes and pull requests to the default branch
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
-  build:
+  pylint:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.8", "3.9", "3.10"]
+
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
+    # Step 1: Checkout the repository
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    # Step 2: Set up Python
+    - name: Set up Python
+      uses: actions/setup-python@v4
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: 3.10  # Match your Python version
+
+    # Step 3: Install dependencies
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install pylint
-    - name: Analysing the code with pylint
+        python -m venv venv
+        source venv/bin/activate
+        pip install --upgrade pip
+        pip install -r requirements.txt  # Install project dependencies
+        pip install pylint               # Install pylint
+
+    # Step 4: Run Pylint on the codebase
+    - name: Run Pylint
       run: |
-        pylint $(git ls-files '*.py')
+        source venv/bin/activate
+        pylint --rcfile=.pylintrc $(find . -name "*.py")  # Lint all Python files
