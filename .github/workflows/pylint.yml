@@ -30,6 +30,11 @@ jobs:
         run: |
           sudo apt-get install -y python3.10 python3.10-venv python3.10-distutils
           python3.10 --version  # Verify installation
+   
+      # Step 3.5 - specify what version is known now....
+      - name: Debug Python Version
+        run: |
+          echo "Specified Python version: ${{ matrix.python-version }}"
 
       # Step 4: Set up Python
       - name: Set up Python
