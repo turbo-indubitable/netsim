@@ -11,7 +11,7 @@ on:
 
 jobs:
   pylint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
     # Step 1: Checkout the repository
@@ -22,7 +22,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: 3.10  # Match your Python version
+        python-version: 3.10
 
     # Step 3: Install dependencies
     - name: Install dependencies
