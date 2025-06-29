@@ -143,8 +143,8 @@ class NTPPattern(BasePattern):
     def generate(self, **kwargs):
         ntp_payload = b"\x1b" + b"\0" * 47
         yield self.pkt_udp(
-            self.src_ip,
-            self.dst_ip,
+            src_ip=self.src_ip,
+            dst_ip=self.dst_ip,
             dport=123,
             payload=ntp_payload
         )
@@ -156,8 +156,8 @@ class SNMPPattern(BasePattern):
         snmp_payload = b"\x30\x26\x02\x01\x01\x04\x06public\xa0\x19\x02\x04\x71\xb6\x2e\x31" \
                        b"\x02\x01\x00\x02\x01\x00\x30\x0b\x30\x09\x06\x05\x2b\x06\x01\x02\x01\x05"
         yield self.pkt_udp(
-            self.src_ip,
-            self.dst_ip,
+            src_ip=self.src_ip,
+            dst_ip=self.dst_ip,
             dport=161,
             payload=snmp_payload
         )
@@ -179,9 +179,9 @@ class DNSQueryPattern(BasePattern):
                 an=DNSRR(rrname=query_name, ttl=60, rdata="93.184.216.34")
             )
 
-            yield self.pkt_udp(src_ip, self.dst_ip, sport=sport, dport=53, payload=bytes(query))
+            yield self.pkt_udp(src_ip=self.src_ip, dst_ip=self.dst_ip, sport=sport, dport=53, payload=bytes(query))
             time.sleep(0.05)
-            yield self.pkt_udp(self.dst_ip, src_ip, sport=53, dport=sport, payload=bytes(response))
+            yield self.pkt_udp(src_ip=self.dst_ip, dst_ip=src_ip, sport=53, dport=sport, payload=bytes(response))
             time.sleep(0.05)
 
     def choose_random_src_ip(self) -> str:
@@ -192,8 +192,17 @@ class GREPattern(BasePattern):
     name = "gre"
 
     def generate(self, **kwargs):
-        inner = IP(src="192.168.1.1", dst="10.0.0.1") / ICMP()
-        yield self.pkt_gre(self.src_ip, self.dst_ip, inner_pkt=inner)
+        ICMPinner = IP(src="192.168.1.1", dst="10.0.0.1") / ICMP()
+        # Generate an inner DNS packet
+        DNSinner = DNSNormalPattern().pkt_udp(
+            src_ip="10.0.0.1",
+            dst_ip="8.8.8.8",
+            src_port=12345,
+            dst_port=53,
+            payload=b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"  # raw DNS query
+        )
+        yield self.pkt_gre(src_ip=self.src_ip, dst_ip=self.dst_ip, payload=ICMPinner)
+        yield self.pkt_gre(src_ip=self.src_ip, dst_ip=self.dst_ip, payload=DNSinner)
 
 class IPSECISAKMPPattern(BasePattern):
     name = "ipsec_isakmp"

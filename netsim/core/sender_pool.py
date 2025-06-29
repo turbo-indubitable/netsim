@@ -4,6 +4,8 @@ import os
 import psutil
 import logging
 from netsim.logger.netsim_logging_manager import log_with_tag
+from scapy.all import Ether, Packet
+from typing import Union
 
 TAG = "SenderPool"
 logger = logging.getLogger(__name__)
@@ -13,6 +15,17 @@ def log(level, msg):
     level_int = LEVELS.get(level.upper(), logging.INFO) if isinstance(level, str) else level
     log_with_tag(logger, level_int, TAG, msg)
 
+def normalize_packet(pkt: Union[Packet, bytes]) -> Packet:
+    """Ensure the packet is a Scapy Packet. Attempt to decode if it's raw bytes."""
+    if isinstance(pkt, Packet):
+        return pkt
+    elif isinstance(pkt, bytes):
+        try:
+            return Ether(pkt)
+        except Exception as e:
+            raise ValueError(f"Could not decode packet from bytes: {e}")
+    else:
+        raise TypeError(f"Unsupported packet type: {type(pkt)}")
 
 def packet_sender_worker(queue, iface):
     log("INFO", f"[worker] Started for iface={iface}")
@@ -26,6 +39,7 @@ def packet_sender_worker(queue, iface):
             log("INFO", "[worker] Received shutdown signal.")
             break
         try:
+            pkt = normalize_packet(pkt)
             log("DEBUG", f"[worker] Sending: {pkt.summary()}")
             sendp(pkt, iface=iface, verbose=True)
         except Exception as e:

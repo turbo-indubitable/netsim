@@ -5,6 +5,7 @@ import traceback
 from netsim.pattern_registry import PATTERN_REGISTRY
 from netsim.utils import safe_instantiate_pattern
 from prompt_toolkit import print_formatted_text as p
+from netsim.core.sender_pool import normalize_packet
 import time
 
 
@@ -60,9 +61,18 @@ def runner_entrypoint(
         for pkt in pattern.generate():
             if isinstance(pkt, list):
                 for i, subpkt in enumerate(pkt):
-                    print(f"[runner:{pattern_id}] Yielded[{i}]: {subpkt.summary()}")
+                    try:
+                        normalized = normalize_packet(subpkt)
+                        print(f"[runner:{pattern_id}] Yielded: {normalized.summary()}")
+                    except Exception:
+                        print(
+                            f"[runner:{pattern_id}] Yielded non-packet object of type {type(subpkt)} with length {len(subpkt)}")
             else:
-                print(f"[runner:{pattern_id}] Yielded: {pkt.summary()}")
+                try:
+                    normalized = normalize_packet(pkt)
+                    print(f"[runner:{pattern_id}] Yielded: {normalized.summary()}")
+                except Exception:
+                    print(f"[runner:{pattern_id}] Yielded non-packet object of type {type(pkt)} with length {len(pkt)}")
 
             if shared_queue is not None:
                 try:
